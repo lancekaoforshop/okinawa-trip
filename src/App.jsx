@@ -143,27 +143,56 @@ function AddModal({ onClose, onAdd }) {
 function TlItem({item,onDelete,onDragStart,onDragOver,onDrop,onDragEnd,isDragging,isOver}){
   const bg=DOT_COLORS[item.emoji]||"#f0f0f0";
   return(
-    <div draggable
+    <div
+      draggable
       onDragStart={()=>onDragStart(item.id)}
       onDragOver={e=>{e.preventDefault();onDragOver(item.id);}}
       onDrop={()=>onDrop(item.id)}
       onDragEnd={onDragEnd}
-      style={{display:"flex",gap:14,marginBottom:2,position:"relative",opacity:isDragging?0.35:1,outline:isOver?"2px dashed #00b4d8":"none",outlineOffset:3,borderRadius:12,transition:"opacity 0.15s",cursor:"grab",background:isOver?"rgba(202,240,248,0.3)":"transparent"}}>
-      <div style={{position:"absolute",left:-4,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:3,opacity:0.3}}>
-        {[0,1,2].map(i=><div key={i} style={{width:4,height:4,borderRadius:"50%",background:"#718096"}}/>)}
-      </div>
-      <div style={{flexShrink:0,zIndex:1,paddingTop:2}}>
+      style={{
+        display:"flex", alignItems:"stretch", gap:0, marginBottom:6,
+        position:"relative", borderRadius:14,
+        background: isOver ? "rgba(202,240,248,0.45)" : isDragging ? "rgba(0,0,0,0.03)" : "white",
+        border: isOver ? "2px solid #00b4d8" : "2px solid transparent",
+        boxShadow: isDragging ? "0 8px 24px rgba(0,119,182,0.18)" : "0 1px 6px rgba(0,0,0,0.06)",
+        opacity: isDragging ? 0.5 : 1,
+        transition:"box-shadow 0.15s, border 0.15s, opacity 0.15s",
+        cursor:"grab",
+        userSelect:"none",
+      }}>
+
+      {/* 左側 emoji dot（含 timeline line 對齊用 padding） */}
+      <div style={{flexShrink:0,padding:"14px 0 14px 14px",display:"flex",alignItems:"flex-start",zIndex:1}}>
         <div style={{width:42,height:42,borderRadius:12,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 2px 8px rgba(0,0,0,0.08)"}}>{item.emoji}</div>
       </div>
-      <div style={{flex:1,paddingBottom:20,minWidth:0}}>
+
+      {/* 主要內容 */}
+      <div style={{flex:1,padding:"14px 8px 14px 12px",minWidth:0}}>
         {item.time&&<div style={{fontSize:12,color:"#718096",fontWeight:600,marginBottom:5}}>{item.time}</div>}
         <div style={{fontSize:16,fontWeight:700,color:"#1a1a2e",lineHeight:1.35}}>{item.title}</div>
         {item.booked&&<div style={{display:"inline-flex",alignItems:"center",gap:3,background:"#d8f3dc",color:"#2d6a4f",borderRadius:7,padding:"3px 9px",fontSize:12,fontWeight:700,marginTop:6}}>✅ 已訂位</div>}
         {item.desc&&<div style={{fontSize:13,color:"#4a5568",marginTop:7,lineHeight:1.65,whiteSpace:"pre-line"}}>{item.desc}</div>}
         <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
-          {item.map&&<a href={item.map} target="_blank" rel="noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,textDecoration:"none"}}>🗺️ Google Maps</a>}
-          <button onClick={()=>onDelete(item.id)} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#fff0f0",color:"#c53030",border:"none",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🗑️ 刪除</button>
+          {item.map&&<a href={item.map} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,textDecoration:"none"}}>🗺️ Google Maps</a>}
+          <button onClick={e=>{e.stopPropagation();onDelete(item.id);}} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#fff0f0",color:"#c53030",border:"none",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🗑️ 刪除</button>
         </div>
+      </div>
+
+      {/* 右側拖拉把手 — 大面積、明顯 */}
+      <div style={{
+        flexShrink:0, width:36, display:"flex", flexDirection:"column",
+        alignItems:"center", justifyContent:"center", gap:4,
+        borderLeft:"1px solid #f0f4f8", borderRadius:"0 12px 12px 0",
+        background:"#fafbfc", cursor:"grab", padding:"0 4px",
+      }}>
+        {/* 六個點的 grip icon */}
+        {[[0,1],[2,3],[4,5]].map((_,row)=>(
+          <div key={row} style={{display:"flex",gap:4}}>
+            {[0,1].map(col=>(
+              <div key={col} style={{width:5,height:5,borderRadius:"50%",background:"#c0ccd8"}}/>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -249,12 +278,12 @@ function DayView({ config, items, onAdd, onDelete, onReorder }) {
       </div>
 
       {/* 拖拉提示 */}
-      <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#a0aec0",marginBottom:10,paddingLeft:4}}>
-        <span>☰</span><span>長按並拖拉可調整行程順序</span>
+      <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#b0bec5",marginBottom:10,paddingLeft:4}}>
+        <span style={{fontSize:13}}>⠿</span><span>拖拉右側圖示可調整行程順序</span>
       </div>
 
       <div style={{position:"relative"}}>
-        <div style={{position:"absolute",left:20,top:0,bottom:0,width:2,background:"linear-gradient(to bottom,#00b4d8,#caf0f8)",borderRadius:2}}/>
+        <div style={{position:"absolute",left:34,top:0,bottom:0,width:2,background:"linear-gradient(to bottom,#00b4d8,#caf0f8)",borderRadius:2,zIndex:0}}/>
         {displayItems.map(item=>(
           <TlItem key={item.id} item={item} onDelete={onDelete}
             onDragStart={handleDragStart}
