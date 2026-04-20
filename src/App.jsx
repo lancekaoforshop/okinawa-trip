@@ -361,7 +361,14 @@ function DayView({ config, items, onAdd, onDelete, onReorder }) {
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────
-function Overview(){
+function Overview({ items }){
+  // 動態從所有天的行程中撈出 booked:true 的項目
+  const bookedItems = DAY_CONFIGS.flatMap(d =>
+    (items[d.id] || [])
+      .filter(item => item.booked)
+      .map(item => ({ ...item, dayLabel: d.date, dayWeekday: d.weekday }))
+  );
+
   return(
     <div>
       {[{grad:"linear-gradient(135deg,#023e8a,#0077b6)",tag:"去程",label:"台北 → 沖繩（那霸）",dep:"16:25",depApt:"TPE 桃園T2",arr:"18:55",arrApt:"OKA 那霸機場",dur:"1h 30m",info:"5月20日（週三）",flight:"BR186 長榮航空",plane:"A321 經濟艙V"},{grad:"linear-gradient(135deg,#1b4332,#52b788)",tag:"回程",label:"沖繩（那霸）→ 台北",dep:"10:15",depApt:"OKA 那霸機場",arr:"10:55",arrApt:"TPE 桃園T2",dur:"1h 40m",info:"5月24日（週日）",flight:"BR113 長榮航空",plane:"A321 經濟艙V"}].map((f,i)=>(
@@ -375,12 +382,26 @@ function Overview(){
           <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.18)",display:"flex",justifyContent:"space-between",fontSize:11,opacity:0.78}}><span>📅 {f.info}</span><span>{f.flight}</span><span>{f.plane}</span></div>
         </div>
       ))}
+
       <div style={{background:"white",borderRadius:16,padding:16,marginBottom:14,boxShadow:"0 4px 20px rgba(0,119,182,0.10)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,fontSize:15,fontWeight:700,marginBottom:14,color:"#1a1a2e"}}><div style={{width:32,height:32,borderRadius:9,background:"#d8f3dc",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🍽️</div>已訂位餐廳</div>
-        {[{emoji:"🐟",name:"國際通 島豚屋",detail:"5/22（五）・18:45・已訂位",map:"https://share.google/Jv6Ax2WIPhN4jq2bV",warn:null},{emoji:"🦞",name:"美國村 蒸氣海鮮",detail:"5/23（六）・18:00・已訂位・6位",map:null,warn:"⚠️ 備註：需要兒童座椅"}].map((b,i)=>(
-          <div key={i} style={{display:"flex",gap:12,padding:"12px 0",borderBottom:i===0?"1px solid #f0f4f8":"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,fontSize:15,fontWeight:700,marginBottom: bookedItems.length ? 14 : 0,color:"#1a1a2e"}}>
+          <div style={{width:32,height:32,borderRadius:9,background:"#d8f3dc",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🍽️</div>
+          已訂位 / 已預約
+        </div>
+        {bookedItems.length === 0 && (
+          <div style={{fontSize:13,color:"#b0bec5",paddingTop:8}}>目前沒有已訂位的行程</div>
+        )}
+        {bookedItems.map((b, i) => (
+          <div key={b.id} style={{display:"flex",gap:12,padding:"12px 0",borderBottom:i < bookedItems.length-1 ? "1px solid #f0f4f8" : "none"}}>
             <div style={{fontSize:24,flexShrink:0,marginTop:2}}>{b.emoji}</div>
-            <div><div style={{fontSize:15,fontWeight:700,color:"#1a1a2e"}}>{b.name}</div><div style={{fontSize:13,color:"#718096",marginTop:3}}>{b.detail}</div>{b.warn&&<div style={{fontSize:13,color:"#f4845f",marginTop:3}}>{b.warn}</div>}{b.map&&<a href={b.map} target="_blank" rel="noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 10px",fontSize:12,fontWeight:700,textDecoration:"none",marginTop:7}}>🗺️ Google Maps</a>}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:15,fontWeight:700,color:"#1a1a2e"}}>{b.title}</div>
+              <div style={{fontSize:12,color:"#718096",marginTop:3}}>
+                {b.dayLabel}（{b.dayWeekday}）{b.time ? `・${b.time}` : ""}
+              </div>
+              {b.desc ? <div style={{fontSize:12,color:"#718096",marginTop:2,whiteSpace:"pre-line"}}>{b.desc}</div> : null}
+              {b.map ? <a href={b.map} target="_blank" rel="noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 10px",fontSize:12,fontWeight:700,textDecoration:"none",marginTop:7}}>🗺️ Google Maps</a> : null}
+            </div>
           </div>
         ))}
       </div>
@@ -393,29 +414,39 @@ export default function App(){
   const [tab,setTab]=useState("overview");
   const [items,setItems]=useState(INITIAL_ITEMS);
   const [sync,setSync]=useState("idle");
+  const [isLoaded,setIsLoaded]=useState(false); // 用 state 避免 race condition
   const saveTimer=useRef(null);
-  const loaded=useRef(false);
+  const isSyncing=useRef(false); // 防止 Firebase 回寫觸發再次儲存
 
   useEffect(()=>{
-    if(!db){setSync("offline");loaded.current=true;return;}
+    if(!db){setIsLoaded(true);setSync("offline");return;}
     const ref=doc(db,"trips","okinawa-2025");
     const unsub=onSnapshot(ref,snap=>{
-      if(snap.exists()&&snap.data().items) setItems(snap.data().items);
-      loaded.current=true;
-    },()=>setSync("error"));
+      if(snap.exists()&&snap.data().items){
+        isSyncing.current=true;
+        setItems(snap.data().items);
+      }
+      setIsLoaded(true);
+    },()=>{setSync("error");setIsLoaded(true);});
     return()=>unsub();
   },[]);
 
   useEffect(()=>{
-    if(!loaded.current)return;
+    // 還沒從 Firebase 載入完成，不儲存
+    if(!isLoaded) return;
+    // 這次是 Firebase 回寫觸發的 state 更新，不要再存一次
+    if(isSyncing.current){ isSyncing.current=false; return; }
     clearTimeout(saveTimer.current);
     if(db) setSync("saving");
     saveTimer.current=setTimeout(async()=>{
       if(!db)return;
-      try{await setDoc(doc(db,"trips","okinawa-2025"),{items},{merge:true});setSync("saved");setTimeout(()=>setSync("idle"),2500);}
-      catch{setSync("error");}
+      try{
+        await setDoc(doc(db,"trips","okinawa-2025"),{items},{merge:true});
+        setSync("saved");
+        setTimeout(()=>setSync("idle"),2500);
+      } catch{ setSync("error"); }
     },800);
-  },[items]);
+  },[items, isLoaded]);
 
   function addItem(dayId,item){setItems(p=>({...p,[dayId]:[...p[dayId],item]}));}
   function deleteItem(id){setItems(p=>{const n={};for(const[k,a]of Object.entries(p))n[k]=a.filter(i=>i.id!==id);return n;});}
@@ -446,7 +477,7 @@ export default function App(){
       </div>
 
       <div style={{padding:"18px 16px 60px"}}>
-        {tab==="overview"&&<Overview/>}
+        {tab==="overview"&&<Overview items={items}/>}
         {DAY_CONFIGS.map(d=>tab===d.id&&<DayView key={d.id} config={d} items={items[d.id]} onAdd={addItem} onDelete={deleteItem} onReorder={reorder}/>)}
       </div>
 
