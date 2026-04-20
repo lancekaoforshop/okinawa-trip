@@ -74,6 +74,31 @@ const DOT_COLORS = {"🍽️":"#ffd6c0","🍜":"#ffd6c0","🍣":"#ffd6c0","🍦"
 
 function genId() { return "i"+Date.now()+Math.random().toString(36).slice(2,5); }
 
+// ── 確認儲存視窗 ──────────────────────────────────────────────────────────
+function ConfirmDialog({ onConfirm, onCancel }) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
+      <div style={{background:"white",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:340,boxShadow:"0 20px 60px rgba(0,0,0,0.2)",animation:"popIn 0.2s ease"}}>
+        <div style={{fontSize:36,textAlign:"center",marginBottom:12}}>🔀</div>
+        <div style={{fontSize:17,fontWeight:800,color:"#1a1a2e",textAlign:"center",marginBottom:8}}>確認儲存排序？</div>
+        <div style={{fontSize:13,color:"#718096",textAlign:"center",lineHeight:1.6,marginBottom:24}}>
+          儲存後所有人都會看到<br/>更新後的行程順序
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onCancel} style={{flex:1,padding:"13px",border:"1.5px solid #e2e8f0",background:"white",borderRadius:12,fontFamily:"'Noto Sans TC',sans-serif",fontSize:14,fontWeight:700,color:"#718096",cursor:"pointer"}}>
+            取消
+          </button>
+          <button onClick={onConfirm} style={{flex:2,padding:"13px",background:"#0077b6",border:"none",borderRadius:12,fontFamily:"'Noto Sans TC',sans-serif",fontSize:14,fontWeight:700,color:"white",cursor:"pointer"}}>
+            ✓ 確認儲存
+          </button>
+        </div>
+      </div>
+      <style>{`@keyframes popIn{from{opacity:0;transform:scale(0.92)}to{opacity:1;transform:scale(1)}}`}</style>
+    </div>
+  );
+}
+
+// ── Add Modal ─────────────────────────────────────────────────────────────
 function AddModal({ onClose, onAdd }) {
   const [time,setTime]=useState(""); const [title,setTitle]=useState(""); const [desc,setDesc]=useState("");
   const [mapUrl,setMapUrl]=useState(""); const [booked,setBooked]=useState(false); const [emoji,setEmoji]=useState("📍"); const [err,setErr]=useState(false);
@@ -114,11 +139,16 @@ function AddModal({ onClose, onAdd }) {
   );
 }
 
+// ── Timeline Item ─────────────────────────────────────────────────────────
 function TlItem({item,onDelete,onDragStart,onDragOver,onDrop,onDragEnd,isDragging,isOver}){
   const bg=DOT_COLORS[item.emoji]||"#f0f0f0";
   return(
-    <div draggable onDragStart={()=>onDragStart(item.id)} onDragOver={e=>{e.preventDefault();onDragOver(item.id);}} onDrop={()=>onDrop(item.id)} onDragEnd={onDragEnd}
-      style={{display:"flex",gap:14,marginBottom:2,position:"relative",opacity:isDragging?0.35:1,outline:isOver?"2px dashed #00b4d8":"none",outlineOffset:3,borderRadius:12,transition:"opacity 0.15s",cursor:"grab"}}>
+    <div draggable
+      onDragStart={()=>onDragStart(item.id)}
+      onDragOver={e=>{e.preventDefault();onDragOver(item.id);}}
+      onDrop={()=>onDrop(item.id)}
+      onDragEnd={onDragEnd}
+      style={{display:"flex",gap:14,marginBottom:2,position:"relative",opacity:isDragging?0.35:1,outline:isOver?"2px dashed #00b4d8":"none",outlineOffset:3,borderRadius:12,transition:"opacity 0.15s",cursor:"grab",background:isOver?"rgba(202,240,248,0.3)":"transparent"}}>
       <div style={{position:"absolute",left:-4,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:3,opacity:0.3}}>
         {[0,1,2].map(i=><div key={i} style={{width:4,height:4,borderRadius:"50%",background:"#718096"}}/>)}
       </div>
@@ -139,30 +169,115 @@ function TlItem({item,onDelete,onDragStart,onDragOver,onDrop,onDragEnd,isDraggin
   );
 }
 
-function DayView({config,items,onAdd,onDelete,onReorder}){
-  const [showModal,setShowModal]=useState(false); const [dragId,setDragId]=useState(null); const [overId,setOverId]=useState(null);
-  function handleDrop(targetId){if(!dragId||dragId===targetId)return;const arr=[...items],from=arr.findIndex(i=>i.id===dragId),to=arr.findIndex(i=>i.id===targetId);const[m]=arr.splice(from,1);arr.splice(to,0,m);onReorder(config.id,arr);setDragId(null);setOverId(null);}
-  const[g1,g2]=config.gradient;
-  return(
+// ── Day View ──────────────────────────────────────────────────────────────
+function DayView({ config, items, onAdd, onDelete, onReorder }) {
+  const [showModal, setShowModal] = useState(false);
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  // 拖拉中的暫存順序（尚未確認儲存）
+  const [pendingItems, setPendingItems] = useState(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const originalItems = useRef(items);
+
+  // 同步外部 items 到 originalItems（非拖拉期間）
+  useEffect(() => {
+    if (!dragId && !showConfirm) {
+      originalItems.current = items;
+      setPendingItems(null);
+    }
+  }, [items, dragId, showConfirm]);
+
+  const displayItems = pendingItems || items;
+
+  function handleDragStart(id) {
+    setDragId(id);
+    originalItems.current = items;
+  }
+
+  function handleDragOver(id) {
+    if (!dragId || id === dragId) return;
+    setOverId(id);
+    // 即時預覽排序（視覺上移動，但還沒儲存）
+    const arr = [...displayItems];
+    const from = arr.findIndex(i => i.id === dragId);
+    const to = arr.findIndex(i => i.id === id);
+    if (from === -1 || to === -1) return;
+    const [moved] = arr.splice(from, 1);
+    arr.splice(to, 0, moved);
+    setPendingItems(arr);
+  }
+
+  function handleDrop(targetId) {
+    setOverId(null);
+  }
+
+  function handleDragEnd() {
+    setDragId(null);
+    setOverId(null);
+    // 如果順序有變動，跳出確認視窗
+    if (pendingItems) {
+      const changed = pendingItems.some((item, i) => item.id !== originalItems.current[i]?.id);
+      if (changed) {
+        setShowConfirm(true);
+      } else {
+        setPendingItems(null);
+      }
+    }
+  }
+
+  function handleConfirm() {
+    if (pendingItems) onReorder(config.id, pendingItems);
+    setPendingItems(null);
+    setShowConfirm(false);
+  }
+
+  function handleCancel() {
+    setPendingItems(null);
+    setShowConfirm(false);
+  }
+
+  const [g1, g2] = config.gradient;
+  return (
     <div>
+      {showConfirm && <ConfirmDialog onConfirm={handleConfirm} onCancel={handleCancel} />}
+
       <div style={{background:`linear-gradient(135deg,${g1},${g2})`,borderRadius:16,padding:"18px 20px",marginBottom:18,position:"relative",overflow:"hidden",color:"white"}}>
         <div style={{position:"absolute",right:-8,top:-8,fontSize:64,opacity:0.13}}>{config.emoji}</div>
         <div style={{fontSize:11,fontWeight:700,opacity:0.75,letterSpacing:1,textTransform:"uppercase"}}>DAY {config.label.slice(1)} · {config.date}（{config.weekday}）</div>
         <div style={{fontSize:21,fontWeight:900,marginTop:3,lineHeight:1.2}}>{config.title}</div>
         <div style={{fontSize:13,opacity:0.8,marginTop:5}}>{config.subtitle}</div>
       </div>
+
+      {/* 拖拉提示 */}
+      <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#a0aec0",marginBottom:10,paddingLeft:4}}>
+        <span>☰</span><span>長按並拖拉可調整行程順序</span>
+      </div>
+
       <div style={{position:"relative"}}>
         <div style={{position:"absolute",left:20,top:0,bottom:0,width:2,background:"linear-gradient(to bottom,#00b4d8,#caf0f8)",borderRadius:2}}/>
-        {items.map(item=><TlItem key={item.id} item={item} onDelete={onDelete} onDragStart={id=>setDragId(id)} onDragOver={id=>{if(id!==dragId)setOverId(id);}} onDrop={handleDrop} onDragEnd={()=>{setDragId(null);setOverId(null);}} isDragging={dragId===item.id} isOver={overId===item.id}/>)}
+        {displayItems.map(item=>(
+          <TlItem key={item.id} item={item} onDelete={onDelete}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            isDragging={dragId===item.id}
+            isOver={overId===item.id}
+          />
+        ))}
       </div>
+
       <button onClick={()=>setShowModal(true)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 16px",background:"white",border:"2px dashed #caf0f8",borderRadius:12,cursor:"pointer",fontSize:15,fontWeight:600,color:"#0077b6",marginTop:6}}>
-        <div style={{width:28,height:28,background:"#0077b6",color:"white",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:900,flexShrink:0}}>+</div>新增行程
+        <div style={{width:28,height:28,background:"#0077b6",color:"white",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:900,flexShrink:0}}>+</div>
+        新增行程
       </button>
+
       {showModal&&<AddModal onClose={()=>setShowModal(false)} onAdd={item=>{onAdd(config.id,item);}}/>}
     </div>
   );
 }
 
+// ── Overview ──────────────────────────────────────────────────────────────
 function Overview(){
   return(
     <div>
@@ -190,9 +305,13 @@ function Overview(){
   );
 }
 
+// ── Main App ──────────────────────────────────────────────────────────────
 export default function App(){
-  const [tab,setTab]=useState("overview"); const [items,setItems]=useState(INITIAL_ITEMS); const [sync,setSync]=useState("idle");
-  const saveTimer=useRef(null); const loaded=useRef(false);
+  const [tab,setTab]=useState("overview");
+  const [items,setItems]=useState(INITIAL_ITEMS);
+  const [sync,setSync]=useState("idle");
+  const saveTimer=useRef(null);
+  const loaded=useRef(false);
 
   useEffect(()=>{
     if(!db){setSync("offline");loaded.current=true;return;}
@@ -220,7 +339,7 @@ export default function App(){
   function reorder(dayId,arr){setItems(p=>({...p,[dayId]:arr}));}
 
   const NAV=[{id:"overview",label:"📋",sub:"總覽"},...DAY_CONFIGS.map(d=>({id:d.id,label:d.label,sub:d.date}))];
-  const syncMsg={saving:"同步中…",saved:"☁️ 已同步，所有人即時更新",error:"⚠️ 同步失敗",offline:"📴 本地模式（未設定 Firebase）",idle:""};
+  const syncMsg={saving:"同步中…",saved:"☁️ 已同步，所有人即時更新",error:"⚠️ 同步失敗",offline:"📴 本地模式",idle:""};
   const syncColor={saving:"#a0aec0",saved:"#2d6a4f",error:"#c53030",offline:"#e07800",idle:"transparent"};
 
   return(
@@ -235,17 +354,24 @@ export default function App(){
           {["✈️ 長榮航空","🚗 租車自駕","🏠 糸滿 Airbnb","👥 6人同行"].map(b=><span key={b} style={{background:"rgba(255,255,255,0.18)",backdropFilter:"blur(4px)",border:"1px solid rgba(255,255,255,0.28)",color:"white",padding:"4px 11px",borderRadius:20,fontSize:11,fontWeight:600}}>{b}</span>)}
         </div>
       </div>
+
       <div style={{position:"sticky",top:0,zIndex:200,background:"white",boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
         <div style={{display:"flex",overflowX:"auto",padding:"0 6px",scrollbarWidth:"none"}}>
           {NAV.map(n=><button key={n.id} onClick={()=>setTab(n.id)} style={{flexShrink:0,padding:"13px 14px",border:"none",background:"transparent",cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif",fontSize:11,fontWeight:700,color:tab===n.id?"#0077b6":"#718096",borderBottom:`3px solid ${tab===n.id?"#0077b6":"transparent"}`,whiteSpace:"nowrap"}}><span style={{fontSize:15,display:"block",marginBottom:1}}>{n.label}</span>{n.sub}</button>)}
         </div>
         <div style={{textAlign:"center",fontSize:11,fontWeight:600,minHeight:20,paddingBottom:4,color:syncColor[sync]||"transparent",transition:"color 0.3s"}}>{syncMsg[sync]||"‎"}</div>
       </div>
+
       <div style={{padding:"18px 16px 60px"}}>
         {tab==="overview"&&<Overview/>}
         {DAY_CONFIGS.map(d=>tab===d.id&&<DayView key={d.id} config={d} items={items[d.id]} onAdd={addItem} onDelete={deleteItem} onReorder={reorder}/>)}
       </div>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;900&display=swap');*{box-sizing:border-box;}::-webkit-scrollbar{display:none;}`}</style>
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;900&display=swap');
+        *{box-sizing:border-box;}
+        ::-webkit-scrollbar{display:none;}
+      `}</style>
     </div>
   );
 }
