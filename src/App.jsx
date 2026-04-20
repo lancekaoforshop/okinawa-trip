@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 
@@ -78,22 +78,17 @@ function genId() { return "i"+Date.now()+Math.random().toString(36).slice(2,5); 
 function ConfirmDialog({ onConfirm, onCancel }) {
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
-      <div style={{background:"white",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:340,boxShadow:"0 20px 60px rgba(0,0,0,0.2)",animation:"popIn 0.2s ease"}}>
+      <div style={{background:"white",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:340,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
         <div style={{fontSize:36,textAlign:"center",marginBottom:12}}>🔀</div>
         <div style={{fontSize:17,fontWeight:800,color:"#1a1a2e",textAlign:"center",marginBottom:8}}>確認儲存排序？</div>
         <div style={{fontSize:13,color:"#718096",textAlign:"center",lineHeight:1.6,marginBottom:24}}>
           儲存後所有人都會看到<br/>更新後的行程順序
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button onClick={onCancel} style={{flex:1,padding:"13px",border:"1.5px solid #e2e8f0",background:"white",borderRadius:12,fontFamily:"'Noto Sans TC',sans-serif",fontSize:14,fontWeight:700,color:"#718096",cursor:"pointer"}}>
-            取消
-          </button>
-          <button onClick={onConfirm} style={{flex:2,padding:"13px",background:"#0077b6",border:"none",borderRadius:12,fontFamily:"'Noto Sans TC',sans-serif",fontSize:14,fontWeight:700,color:"white",cursor:"pointer"}}>
-            ✓ 確認儲存
-          </button>
+          <button onClick={onCancel} style={{flex:1,padding:"13px",border:"1.5px solid #e2e8f0",background:"white",borderRadius:12,fontFamily:"'Noto Sans TC',sans-serif",fontSize:14,fontWeight:700,color:"#718096",cursor:"pointer"}}>取消</button>
+          <button onClick={onConfirm} style={{flex:2,padding:"13px",background:"#0077b6",border:"none",borderRadius:12,fontFamily:"'Noto Sans TC',sans-serif",fontSize:14,fontWeight:700,color:"white",cursor:"pointer"}}>✓ 確認儲存</button>
         </div>
       </div>
-      <style>{`@keyframes popIn{from{opacity:0;transform:scale(0.92)}to{opacity:1;transform:scale(1)}}`}</style>
     </div>
   );
 }
@@ -139,61 +134,194 @@ function AddModal({ onClose, onAdd }) {
   );
 }
 
-// ── Timeline Item ─────────────────────────────────────────────────────────
-function TlItem({item,onDelete,onDragStart,onDragOver,onDrop,onDragEnd,isDragging,isOver}){
-  const bg=DOT_COLORS[item.emoji]||"#f0f0f0";
-  return(
-    <div
-      draggable
-      onDragStart={()=>onDragStart(item.id)}
-      onDragOver={e=>{e.preventDefault();onDragOver(item.id);}}
-      onDrop={()=>onDrop(item.id)}
-      onDragEnd={onDragEnd}
-      style={{
-        display:"flex", alignItems:"stretch", gap:0, marginBottom:6,
-        position:"relative", borderRadius:14,
-        background: isOver ? "rgba(202,240,248,0.45)" : isDragging ? "rgba(0,0,0,0.03)" : "white",
-        border: isOver ? "2px solid #00b4d8" : "2px solid transparent",
-        boxShadow: isDragging ? "0 8px 24px rgba(0,119,182,0.18)" : "0 1px 6px rgba(0,0,0,0.06)",
-        opacity: isDragging ? 0.5 : 1,
-        transition:"box-shadow 0.15s, border 0.15s, opacity 0.15s",
-        cursor:"grab",
-        userSelect:"none",
-      }}>
+// ── Sortable List (touch-friendly) ────────────────────────────────────────
+function SortableList({ items, onDelete, onReorderDone }) {
+  const [list, setList] = useState(items);
+  const [draggingId, setDraggingId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const originalList = useRef(items);
+  const listRef = useRef(null);
 
-      {/* 左側 emoji dot（含 timeline line 對齊用 padding） */}
-      <div style={{flexShrink:0,padding:"14px 0 14px 14px",display:"flex",alignItems:"flex-start",zIndex:1}}>
-        <div style={{width:42,height:42,borderRadius:12,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 2px 8px rgba(0,0,0,0.08)"}}>{item.emoji}</div>
-      </div>
+  // touch drag state
+  const touchState = useRef(null);
+  const cloneRef = useRef(null);
+  const animFrame = useRef(null);
 
-      {/* 主要內容 */}
-      <div style={{flex:1,padding:"14px 8px 14px 12px",minWidth:0}}>
-        {item.time&&<div style={{fontSize:12,color:"#718096",fontWeight:600,marginBottom:5}}>{item.time}</div>}
-        <div style={{fontSize:16,fontWeight:700,color:"#1a1a2e",lineHeight:1.35}}>{item.title}</div>
-        {item.booked&&<div style={{display:"inline-flex",alignItems:"center",gap:3,background:"#d8f3dc",color:"#2d6a4f",borderRadius:7,padding:"3px 9px",fontSize:12,fontWeight:700,marginTop:6}}>✅ 已訂位</div>}
-        {item.desc&&<div style={{fontSize:13,color:"#4a5568",marginTop:7,lineHeight:1.65,whiteSpace:"pre-line"}}>{item.desc}</div>}
-        <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
-          {item.map&&<a href={item.map} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,textDecoration:"none"}}>🗺️ Google Maps</a>}
-          <button onClick={e=>{e.stopPropagation();onDelete(item.id);}} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#fff0f0",color:"#c53030",border:"none",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🗑️ 刪除</button>
-        </div>
-      </div>
+  // sync when parent items change (e.g. Firebase update) but not during drag
+  useEffect(() => {
+    if (!draggingId) {
+      setList(items);
+      originalList.current = items;
+    }
+  }, [items, draggingId]);
 
-      {/* 右側拖拉把手 — 大面積、明顯 */}
-      <div style={{
-        flexShrink:0, width:36, display:"flex", flexDirection:"column",
-        alignItems:"center", justifyContent:"center", gap:4,
-        borderLeft:"1px solid #f0f4f8", borderRadius:"0 12px 12px 0",
-        background:"#fafbfc", cursor:"grab", padding:"0 4px",
-      }}>
-        {/* 六個點的 grip icon */}
-        {[[0,1],[2,3],[4,5]].map((_,row)=>(
-          <div key={row} style={{display:"flex",gap:4}}>
-            {[0,1].map(col=>(
-              <div key={col} style={{width:5,height:5,borderRadius:"50%",background:"#c0ccd8"}}/>
-            ))}
+  function reorderList(fromId, toId) {
+    setList(prev => {
+      const arr = [...prev];
+      const from = arr.findIndex(i => i.id === fromId);
+      const to = arr.findIndex(i => i.id === toId);
+      if (from === -1 || to === -1 || from === to) return prev;
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      return arr;
+    });
+  }
+
+  // ── Mouse drag handlers ──
+  function handleDragStart(id) { setDraggingId(id); originalList.current = list; }
+  function handleDragOver(e, id) { e.preventDefault(); if (id !== draggingId) { setOverId(id); reorderList(draggingId, id); } }
+  function handleDragEnd() {
+    setDraggingId(null); setOverId(null);
+    const changed = list.some((item, i) => item.id !== originalList.current[i]?.id);
+    if (changed) setShowConfirm(true);
+  }
+
+  // ── Touch drag handlers ──
+  function handleTouchStart(e, id) {
+    // Prevent if tapping a button/link
+    if (e.target.closest("button") || e.target.closest("a")) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+
+    originalList.current = list;
+    setDraggingId(id);
+
+    // Create floating clone
+    const clone = el.cloneNode(true);
+    clone.style.cssText = `
+      position: fixed;
+      left: ${rect.left}px;
+      top: ${rect.top}px;
+      width: ${rect.width}px;
+      z-index: 9999;
+      pointer-events: none;
+      opacity: 0.92;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+      border-radius: 14px;
+      transform: scale(1.03);
+      transition: transform 0.1s;
+      background: white;
+    `;
+    document.body.appendChild(clone);
+    cloneRef.current = clone;
+
+    touchState.current = {
+      id,
+      startY: touch.clientY,
+      startTop: rect.top,
+      offsetY: touch.clientY - rect.top,
+    };
+  }
+
+  function handleTouchMove(e) {
+    e.preventDefault();
+    if (!touchState.current || !cloneRef.current) return;
+    const touch = e.touches[0];
+    const { offsetY } = touchState.current;
+    const newTop = touch.clientY - offsetY;
+    cloneRef.current.style.top = `${newTop}px`;
+
+    // Find which item we're hovering over
+    cloneRef.current.style.display = "none";
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    cloneRef.current.style.display = "";
+    const targetCard = el?.closest("[data-sortid]");
+    if (targetCard) {
+      const targetId = targetCard.dataset.sortid;
+      if (targetId && targetId !== touchState.current.id) {
+        setOverId(targetId);
+        reorderList(touchState.current.id, targetId);
+      }
+    }
+  }
+
+  function handleTouchEnd() {
+    if (cloneRef.current) { cloneRef.current.remove(); cloneRef.current = null; }
+    if (!touchState.current) return;
+    touchState.current = null;
+    setDraggingId(null);
+    setOverId(null);
+    const changed = list.some((item, i) => item.id !== originalList.current[i]?.id);
+    if (changed) setShowConfirm(true);
+  }
+
+  function handleConfirm() { onReorderDone(list); setShowConfirm(false); }
+  function handleCancel() { setList(originalList.current); setShowConfirm(false); }
+
+  const DOT_BG = (emoji) => DOT_COLORS[emoji] || "#f0f0f0";
+
+  return (
+    <div ref={listRef}
+      onTouchMove={draggingId ? e => { e.preventDefault(); handleTouchMove(e); } : undefined}
+      onTouchEnd={draggingId ? handleTouchEnd : undefined}
+      style={{touchAction: draggingId ? "none" : "pan-y"}}
+    >
+      {showConfirm && <ConfirmDialog onConfirm={handleConfirm} onCancel={handleCancel} />}
+
+      {list.map(item => {
+        const isDragging = draggingId === item.id;
+        const isOver = overId === item.id;
+        return (
+          <div key={item.id} data-sortid={item.id}
+            draggable
+            onDragStart={() => handleDragStart(item.id)}
+            onDragOver={e => handleDragOver(e, item.id)}
+            onDragEnd={handleDragEnd}
+            onTouchStart={e => handleTouchStart(e, item.id)}
+            style={{
+              display:"flex", alignItems:"stretch", marginBottom:8,
+              borderRadius:14, overflow:"hidden",
+              background: isOver ? "#e8f6fd" : "white",
+              border: `2px solid ${isOver ? "#00b4d8" : isDragging ? "#caf0f8" : "#f0f4f8"}`,
+              boxShadow: isDragging ? "none" : "0 1px 6px rgba(0,0,0,0.06)",
+              opacity: isDragging ? 0.3 : 1,
+              transition:"border 0.15s, box-shadow 0.15s, opacity 0.15s",
+            }}
+          >
+            {/* Left: emoji */}
+            <div style={{flexShrink:0,padding:"14px 0 14px 14px",display:"flex",alignItems:"flex-start"}}>
+              <div style={{width:42,height:42,borderRadius:12,background:DOT_BG(item.emoji),display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 2px 8px rgba(0,0,0,0.07)"}}>{item.emoji}</div>
+            </div>
+
+            {/* Middle: content */}
+            <div style={{flex:1,padding:"14px 8px 14px 12px",minWidth:0}}>
+              {item.time && <div style={{fontSize:12,color:"#718096",fontWeight:600,marginBottom:5}}>{item.time}</div>}
+              <div style={{fontSize:16,fontWeight:700,color:"#1a1a2e",lineHeight:1.35}}>{item.title}</div>
+              {item.booked && <div style={{display:"inline-flex",alignItems:"center",gap:3,background:"#d8f3dc",color:"#2d6a4f",borderRadius:7,padding:"3px 9px",fontSize:12,fontWeight:700,marginTop:6}}>✅ 已訂位</div>}
+              {item.desc && <div style={{fontSize:13,color:"#4a5568",marginTop:7,lineHeight:1.65,whiteSpace:"pre-line"}}>{item.desc}</div>}
+              <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
+                {item.map && <a href={item.map} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,textDecoration:"none"}}>🗺️ Google Maps</a>}
+                <button onClick={e=>{e.stopPropagation();onDelete(item.id);}} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#fff0f0",color:"#c53030",border:"none",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🗑️ 刪除</button>
+              </div>
+            </div>
+
+            {/* Right: drag handle — big touch target */}
+            <div
+              onTouchStart={e => handleTouchStart(e, item.id)}
+              style={{
+                flexShrink:0, width:44,
+                display:"flex", flexDirection:"column",
+                alignItems:"center", justifyContent:"center", gap:5,
+                background:"#f7f9fb",
+                borderLeft:"1px solid #edf2f7",
+                cursor:"grab", padding:"0 4px",
+                touchAction:"none",
+              }}
+            >
+              {[0,1,2].map(row => (
+                <div key={row} style={{display:"flex",gap:4}}>
+                  {[0,1].map(col => (
+                    <div key={col} style={{width:5,height:5,borderRadius:"50%",background:"#b0bec5"}}/>
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
@@ -201,107 +329,33 @@ function TlItem({item,onDelete,onDragStart,onDragOver,onDrop,onDragEnd,isDraggin
 // ── Day View ──────────────────────────────────────────────────────────────
 function DayView({ config, items, onAdd, onDelete, onReorder }) {
   const [showModal, setShowModal] = useState(false);
-  const [dragId, setDragId] = useState(null);
-  const [overId, setOverId] = useState(null);
-  // 拖拉中的暫存順序（尚未確認儲存）
-  const [pendingItems, setPendingItems] = useState(null);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const originalItems = useRef(items);
-
-  // 同步外部 items 到 originalItems（非拖拉期間）
-  useEffect(() => {
-    if (!dragId && !showConfirm) {
-      originalItems.current = items;
-      setPendingItems(null);
-    }
-  }, [items, dragId, showConfirm]);
-
-  const displayItems = pendingItems || items;
-
-  function handleDragStart(id) {
-    setDragId(id);
-    originalItems.current = items;
-  }
-
-  function handleDragOver(id) {
-    if (!dragId || id === dragId) return;
-    setOverId(id);
-    // 即時預覽排序（視覺上移動，但還沒儲存）
-    const arr = [...displayItems];
-    const from = arr.findIndex(i => i.id === dragId);
-    const to = arr.findIndex(i => i.id === id);
-    if (from === -1 || to === -1) return;
-    const [moved] = arr.splice(from, 1);
-    arr.splice(to, 0, moved);
-    setPendingItems(arr);
-  }
-
-  function handleDrop(targetId) {
-    setOverId(null);
-  }
-
-  function handleDragEnd() {
-    setDragId(null);
-    setOverId(null);
-    // 如果順序有變動，跳出確認視窗
-    if (pendingItems) {
-      const changed = pendingItems.some((item, i) => item.id !== originalItems.current[i]?.id);
-      if (changed) {
-        setShowConfirm(true);
-      } else {
-        setPendingItems(null);
-      }
-    }
-  }
-
-  function handleConfirm() {
-    if (pendingItems) onReorder(config.id, pendingItems);
-    setPendingItems(null);
-    setShowConfirm(false);
-  }
-
-  function handleCancel() {
-    setPendingItems(null);
-    setShowConfirm(false);
-  }
-
   const [g1, g2] = config.gradient;
+
   return (
     <div>
-      {showConfirm && <ConfirmDialog onConfirm={handleConfirm} onCancel={handleCancel} />}
-
-      <div style={{background:`linear-gradient(135deg,${g1},${g2})`,borderRadius:16,padding:"18px 20px",marginBottom:18,position:"relative",overflow:"hidden",color:"white"}}>
+      <div style={{background:`linear-gradient(135deg,${g1},${g2})`,borderRadius:16,padding:"18px 20px",marginBottom:14,position:"relative",overflow:"hidden",color:"white"}}>
         <div style={{position:"absolute",right:-8,top:-8,fontSize:64,opacity:0.13}}>{config.emoji}</div>
         <div style={{fontSize:11,fontWeight:700,opacity:0.75,letterSpacing:1,textTransform:"uppercase"}}>DAY {config.label.slice(1)} · {config.date}（{config.weekday}）</div>
         <div style={{fontSize:21,fontWeight:900,marginTop:3,lineHeight:1.2}}>{config.title}</div>
         <div style={{fontSize:13,opacity:0.8,marginTop:5}}>{config.subtitle}</div>
       </div>
 
-      {/* 拖拉提示 */}
-      <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#b0bec5",marginBottom:10,paddingLeft:4}}>
-        <span style={{fontSize:13}}>⠿</span><span>拖拉右側圖示可調整行程順序</span>
+      <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#b0bec5",marginBottom:10,paddingLeft:2}}>
+        <span>⠿</span><span>拖拉右側的 ⠿ 圖示可調整行程順序</span>
       </div>
 
-      <div style={{position:"relative"}}>
-        <div style={{position:"absolute",left:34,top:0,bottom:0,width:2,background:"linear-gradient(to bottom,#00b4d8,#caf0f8)",borderRadius:2,zIndex:0}}/>
-        {displayItems.map(item=>(
-          <TlItem key={item.id} item={item} onDelete={onDelete}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            onDragEnd={handleDragEnd}
-            isDragging={dragId===item.id}
-            isOver={overId===item.id}
-          />
-        ))}
-      </div>
+      <SortableList
+        items={items}
+        onDelete={onDelete}
+        onReorderDone={arr => onReorder(config.id, arr)}
+      />
 
-      <button onClick={()=>setShowModal(true)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 16px",background:"white",border:"2px dashed #caf0f8",borderRadius:12,cursor:"pointer",fontSize:15,fontWeight:600,color:"#0077b6",marginTop:6}}>
+      <button onClick={()=>setShowModal(true)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 16px",background:"white",border:"2px dashed #caf0f8",borderRadius:12,cursor:"pointer",fontSize:15,fontWeight:600,color:"#0077b6",marginTop:4}}>
         <div style={{width:28,height:28,background:"#0077b6",color:"white",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:900,flexShrink:0}}>+</div>
         新增行程
       </button>
 
-      {showModal&&<AddModal onClose={()=>setShowModal(false)} onAdd={item=>{onAdd(config.id,item);}}/>}
+      {showModal && <AddModal onClose={()=>setShowModal(false)} onAdd={item=>{onAdd(config.id,item);}}/>}
     </div>
   );
 }
