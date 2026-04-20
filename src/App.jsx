@@ -179,12 +179,12 @@ function SortableList({ items, onDelete, onReorderDone }) {
 
   // ── Touch drag handlers ──
   function handleTouchStart(e, id) {
-    // Prevent if tapping a button/link
-    if (e.target.closest("button") || e.target.closest("a")) return;
     e.preventDefault();
     const touch = e.touches[0];
-    const el = e.currentTarget;
-    const rect = el.getBoundingClientRect();
+    // 找到整張卡片（data-sortid），而不只是 handle div
+    const card = e.currentTarget.closest("[data-sortid]") || e.currentTarget;
+    const rect = card.getBoundingClientRect();
+    const el = card;
 
     originalList.current = list;
     setDraggingId(id);
@@ -266,11 +266,8 @@ function SortableList({ items, onDelete, onReorderDone }) {
         const isOver = overId === item.id;
         return (
           <div key={item.id} data-sortid={item.id}
-            draggable
-            onDragStart={() => handleDragStart(item.id)}
             onDragOver={e => handleDragOver(e, item.id)}
             onDragEnd={handleDragEnd}
-            onTouchStart={e => handleTouchStart(e, item.id)}
             style={{
               display:"flex", alignItems:"stretch", marginBottom:8,
               borderRadius:14, overflow:"hidden",
@@ -286,20 +283,22 @@ function SortableList({ items, onDelete, onReorderDone }) {
               <div style={{width:42,height:42,borderRadius:12,background:DOT_BG(item.emoji),display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 2px 8px rgba(0,0,0,0.07)"}}>{item.emoji}</div>
             </div>
 
-            {/* Middle: content */}
-            <div style={{flex:1,padding:"14px 8px 14px 12px",minWidth:0}}>
+            {/* Middle: content — 不觸發拖拉 */}
+            <div style={{flex:1,padding:"14px 8px 14px 12px",minWidth:0,userSelect:"text"}}>
               {item.time && <div style={{fontSize:12,color:"#718096",fontWeight:600,marginBottom:5}}>{item.time}</div>}
               <div style={{fontSize:16,fontWeight:700,color:"#1a1a2e",lineHeight:1.35}}>{item.title}</div>
               {item.booked && <div style={{display:"inline-flex",alignItems:"center",gap:3,background:"#d8f3dc",color:"#2d6a4f",borderRadius:7,padding:"3px 9px",fontSize:12,fontWeight:700,marginTop:6}}>✅ 已訂位</div>}
               {item.desc && <div style={{fontSize:13,color:"#4a5568",marginTop:7,lineHeight:1.65,whiteSpace:"pre-line"}}>{item.desc}</div>}
               <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
-                {item.map && <a href={item.map} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,textDecoration:"none"}}>🗺️ Google Maps</a>}
-                <button onClick={e=>{e.stopPropagation();onDelete(item.id);}} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#fff0f0",color:"#c53030",border:"none",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🗑️ 刪除</button>
+                {item.map && <a href={item.map} target="_blank" rel="noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"#caf0f8",color:"#0077b6",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,textDecoration:"none"}}>🗺️ Google Maps</a>}
+                <button onClick={()=>onDelete(item.id)} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#fff0f0",color:"#c53030",border:"none",borderRadius:7,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🗑️ 刪除</button>
               </div>
             </div>
 
-            {/* Right: drag handle — big touch target */}
+            {/* Right: drag handle — 唯一觸發拖拉的區域 */}
             <div
+              draggable
+              onDragStart={e => { e.stopPropagation(); handleDragStart(item.id); }}
               onTouchStart={e => handleTouchStart(e, item.id)}
               style={{
                 flexShrink:0, width:44,
@@ -309,6 +308,7 @@ function SortableList({ items, onDelete, onReorderDone }) {
                 borderLeft:"1px solid #edf2f7",
                 cursor:"grab", padding:"0 4px",
                 touchAction:"none",
+                userSelect:"none",
               }}
             >
               {[0,1,2].map(row => (
